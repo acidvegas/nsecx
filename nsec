@@ -1,0 +1,32 @@
+#!/bin/sh
+# NSEC walk script for DNSSEC - developed by acidvegas (https://git.acid.vegas/nsecx)
+
+# This script will walk through a DNS zone using NSEC records.
+
+# TLD to start the walk from
+tld="$1"
+
+# Initialize the top-level domain (TLD) to start the walk from
+current_domain="$tld"
+
+# Loop to walk through the zone using NSEC records
+while true; do
+    # Perform the dig command to get the NSEC record for the current domain
+    output="$(dig +trace $current_domain NSEC)"
+
+    # Use grep to find the line with the current domain and then use awk to extract the next domain
+    next_domain=$(echo "$output" | grep -F "$current_domain" | awk '$4 == "NSEC" { print $5 }')
+
+    # Check if we got a valid next domain
+    if [ -z "$next_domain" ] || [ "$next_domain" = "$current_domain" ]; then
+        echo "$output"
+        echo "End of zone reached or no more domains found."
+        break
+    fi
+
+    # Print the next domain
+    echo "Next domain: $next_domain"
+
+    # Update the current domain to the next one for the following iteration
+    current_domain=$next_domain
+done

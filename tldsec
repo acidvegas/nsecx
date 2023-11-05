@@ -1,0 +1,81 @@
+#!/bin/sh
+# NSEC walk script for DNSSEC - developed by acidvegas (https://git.acid.vegas/nsecx)
+
+# This script will check the DNSSEC status of all TLDs and output the results separated by NSEC, NSEC3, and NODNSSEC.
+# NSEC3 records will also include the NSEC3PARAM parameters for the zone as well for cracking in Hashcat.
+
+# ANSI color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+GRAY='\033[1;30m'
+NC='\033[0m' # No Color
+
+# Create the output directory if it doesn't exist
+mkdir -p output
+
+# Fetch the list of TLDs using curl
+tld_list=$(curl -s "https://data.iana.org/TLD/tlds-alpha-by-domain.txt")
+
+# Check if the list was retrieved successfully
+if [ -z "$tld_list" ]; then
+    printf "${RED}Failed to fetch the list of TLDs.${NC}\n"
+    exit 1
+fi
+
+# Get the total number of TLDs, excluding comments and empty lines
+total_tlds=$(echo "$tld_list" | grep -v '^#' | grep -v '^$' | wc -l | tr -d ' ')
+
+# Initialize TLD count
+current_tld=0
+nsec_total=0
+nsec3_total=0
+nodnssec_total=0
+
+# Read through each TLD in the list
+echo "$tld_list" | while read -r tld; do
+    # Skip comments and empty lines
+    case "$tld" in
+        \#*|"") continue;;
+    esac
+
+    # Increase TLD count
+    current_tld=$((current_tld + 1))
+
+    # Convert TLD to lowercase using tr
+    tld=$(printf "%s" "$tld" | tr '[:upper:]' '[:lower:]')
+
+    # Check for DNSSEC records
+    output=$(dig +short ${tld}. DNSKEY)
+
+    if [ -z "$output" ]; then
+        nodnssec_total=$((nodnssec_total + 1))
+        echo "$tld" >> output/nodnssec.txt
+    else
+        nsec_output=$(dig +short ${tld}. NSEC)
+        nsec3_output=$(dig +short ${tld}. NSEC3PARAM)
+        if [ -n "$nsec_output" ]; then
+            nsec_total=$((nsec_total + 1))
+            echo "$tld" >> output/nsec.txt
+        elif [ -n "$nsec3_output" ]; then
+            nsec3_total=$((nsec3_total + 1))
+            nsec3_params=$(echo "$nsec3_output" | awk '{print $1,$2,$3,$4}')
+            echo "${tld}:${nsec3_params}" >> output/nsec3.txt
+        else
+            nodnssec_total=$((nodnssec_total + 1))
+            echo "$tld" >> output/nodnssec.txt
+        fi
+    fi
+
+    # Output the summarized status line with color
+    printf "\r${CYAN}%s/%s${NC} ${GRAY}|${NC} ${GREEN}NSEC: ${NC}%s ${GRAY}|${NC} ${YELLOW}NSEC3: ${NC}%s ${GRAY}|${NC} ${RED}NODNSSEC: ${NC}%s ${GRAY}|${NC} Checking ${PURPLE}%s${NC}...                    " \
+           "$current_tld" "$total_tlds" \
+           "$nsec_total" "$nsec3_total" "$nodnssec_total" "$tld"
+done
+
+# Move to a new line after the loop is done to avoid overwriting the last line
+echo
+
+echo "Check completed! Data written to the output directory."
