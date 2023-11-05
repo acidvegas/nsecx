@@ -9,6 +9,9 @@ The repository contains utilities for DNSSEC zone enumeration and subdomain disc
 ## Statistics
 Based on my research at the time of writing this repository, after mapping 1,458 TLD zones, 89.37% use NSEC3, and 3.70% use NSEC, and 6.93% do not have DNSSEC features at all.
 
+
+## References
+- https://www.rfc-editor.org/rfc/rfc5155.html
 ___
 
 ###### Mirrors
