@@ -16,8 +16,14 @@ NC='\033[0m' # No Color
 # Create the output directory if it doesn't exist
 mkdir -p output
 
-# Fetch the list of TLDs using curl
-tld_list=$(curl -s "https://data.iana.org/TLD/tlds-alpha-by-domain.txt")
+# Parse the tld list from a root nameserver (todo: randomize the root nameserver)
+rndroot=$(dig AXFR . @a.root-servers.net | grep -E 'IN\s+NS' | awk '{print $1}' | sed 's/\.$//' | sort -u)
+if [ -z $rndroot ]; then
+	echo "Failed to AXFR a root nameserver (using IANA list instead)"
+	tlds=$(curl -s 'https://data.iana.org/TLD/tlds-alpha-by-domain.txt' | tail -n +2 | tr '[:upper:]' '[:lower:]')
+else 
+	tlds=$(echo  | )
+fi
 
 # Check if the list was retrieved successfully
 if [ -z "$tld_list" ]; then
