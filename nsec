@@ -4,36 +4,51 @@
 
 # This script will walk through a DNS zone using NSEC records.
 
-# TLD to start the walk from
-tld="$1"
+# You can wall all the zones outputted from tldsec using the following command:
+# cat output/nsec.txt | while read line; do ./nsec "$line"; done
 
-# Initialize the top-level domain (TLD) to start the walk from
-current_domain="$tld"
-
-#dns_servers=$(curl -s https://public-dns.info/nameservers.txt | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+dns_servers=$(curl -s https://public-dns.info/nameservers.txt | grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b')
+nameserver=$(echo "$dns_servers" | shuf -n 1)
 
 # Loop to walk through the zone using NSEC records
-while true; do
-    # Select a random DNS server from the list
-   #nameserver=$(shuf -n 1 -e $dns_servers)
+while IFS= read -r line; do
+    tld="$line"
 
-    # Perform the dig command to get the NSEC record for the current domain
-    #output="$(dig @${nameserver} +trace $current_domain NSEC)"
-    output="$(dig +trace $current_domain NSEC)"
+    current_domain="$tld"
+    retry=0
+    breaker=0
+    while true; do
+        # Perform the dig command to get the NSEC record for the current domain
+        output="$(dig @${nameserver} +trace +time=10 +tries=3 $current_domain NSEC)"
 
-    # Use grep to find the line with the current domain and then use awk to extract the next domain
-    next_domain=$(echo "$output" | grep -F "$current_domain" | awk '$4 == "NSEC" { print $5 }')
+        # Use grep to find the line with the current domain and then use awk to extract the next domain
+        next_domain=$(echo "$output" | grep -F "$current_domain" | awk '$4 == "NSEC" { print $5 }')
 
-    # Check if we got a valid next domain
-    if [ -z "$next_domain" ] || [ "$next_domain" = "$current_domain" ]; then
-        echo "$output"
-        echo "End of zone reached or no more domains found."
-        break
-    fi
+        if [ -z "$next_domain" ] || [ -n "$(printf '%s' "$next_domain" | tr -cd '\000')" ] || [ "$next_domain" = "$current_domain" ]; then
+            next_domain="$current_domain"
+            retry=$((retry + 1))
+        elif [ "$next_domain" = "nic.$tld" ]; then
+            echo "Found NIC!"
+            next_domain=
+        else
+            echo "Found NSEC record: $next_domain"
+            echo "$next_domain" >> output/nsec/$tld.txt
+            retry=0
+            breaker=0
+        fi
 
-    # Print the next domain
-    echo "Next domain: $next_domain"
+        if [ $retry -eq 3 ]; then
+            nameserver=$(echo "$dns_servers" | shuf -n 1)
+            retry=0
+            breaker=$((breaker + 1))
+            if [ $breaker -eq 3 ]; then
+                echo "Failed to get NSEC record for $current_domain"
+                break
+            fi
+        fi
 
-    # Update the current domain to the next one for the following iteration
-    current_domain=$next_domain
-done
+        # Update the current domain to the next one for the following iteration
+        current_domain=$next_domain
+
+    done
+done < nsec.txt
