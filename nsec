@@ -1,5 +1,6 @@
 #!/bin/sh
 # NSEC walk script for DNSSEC - developed by acidvegas (https://git.acid.vegas/nsecx)
+# nsec
 
 # This script will walk through a DNS zone using NSEC records.
 
@@ -9,9 +10,15 @@ tld="$1"
 # Initialize the top-level domain (TLD) to start the walk from
 current_domain="$tld"
 
+#dns_servers=$(curl -s https://public-dns.info/nameservers.txt | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+
 # Loop to walk through the zone using NSEC records
 while true; do
+    # Select a random DNS server from the list
+   #nameserver=$(shuf -n 1 -e $dns_servers)
+
     # Perform the dig command to get the NSEC record for the current domain
+    #output="$(dig @${nameserver} +trace $current_domain NSEC)"
     output="$(dig +trace $current_domain NSEC)"
 
     # Use grep to find the line with the current domain and then use awk to extract the next domain

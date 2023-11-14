@@ -1,0 +1,14 @@
+#!/bin/bash
+# NSEC walk script for DNSSEC - developed by acidvegas (https://git.acid.vegas/nsecx)
+
+# https://github.com/anonion0/nsec3map
+#python3 -m pip install n3map[predict]
+
+TARGET=$1 # Can simply be a TLD (no dot)
+mkdir -p output
+for NS in $(dig @8.8.8.8 +short NS $TARGET | sort -R); do
+	IPADDR=$(dig +short "$1" A || dig +short "$1" AAAA)
+	echo "Targeting $TARGET on $NS ($IPADDR)..."
+	n3map -avpl --output=output/$TARGET_$NS.txt $IPV4 --ignore-overlapping $TARGET
+	echo "-------------------------"
+done
