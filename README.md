@@ -11,7 +11,7 @@ Based on my research at the time of writing this repository, after mapping 1,458
 
 ## NSEC Pitfalls
 - Results inconsistent, must hop dns servers on ALL issues to continue the crawl.
-- Running into \000 *(null)* characters in sub-domains *(strange bind version issue missing "w" character in the charmap)*
+- Running into \000 *(null)* characters in sub-domains *(strange bind version [issue](https://gitlab.isc.org/isc-projects/bind9/-/issues/2779) missing "w" character in the charmap)*
 
 - Running into *.domain.tld issues creates a crawling loop :
 ```
