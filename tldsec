@@ -40,10 +40,6 @@ nodnssec_total=0
 
 # Read through each TLD in the list
 echo "$tld_list" | while read -r tld; do
-    # Skip comments and empty lines
-    case "$tld" in
-        \#*|"") continue;;
-    esac
 
     # Increase TLD count
     current_tld=$((current_tld + 1))

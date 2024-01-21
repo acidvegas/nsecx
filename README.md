@@ -56,13 +56,9 @@ Next domain: *.nic.auto.
 Next domain: _c311ff38bcd400b0adf7fa2b71732858.nic.auto.
 ```
 
-
-
 ## References
 - https://www.rfc-editor.org/rfc/rfc5155.html
+
 ___
 
-###### Mirrors
-[acid.vegas](https://git.acid.vegas/nsecx) • [GitHub](https://github.com/acidvegas/nsecx) • [GitLab](https://gitlab.com/acidvegas/nsecx) • [SuperNETs](https://git.supernets.org/acidvegas/nsecx)
-
-
+###### Mirrors for this repository: [acid.vegas](https://git.acid.vegas/nsecx) • [SuperNETs](https://git.supernets.org/acidvegas/nsecx) • [GitHub](https://github.com/acidvegas/nsecx) • [GitLab](https://gitlab.com/acidvegas/nsecx) • [Codeberg](https://codeberg.org/acidvegas/nsecx)
