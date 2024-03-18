@@ -1,13 +1,18 @@
 # NSECX
+> Research project on NSEC[3] walking for DNSSEC enabled Zones
 
-###### Rsearch project on NSEC[3] walking for DNSSEC enabled Zones
+![](./.screens/preview.gif)
 
-## Work in progress: Come back later
+## [Work in Progress]
 
 The repository contains utilities for DNSSEC zone enumeration and subdomain discovery via NSEC/NSEC3 walking. It focuses on extracting and analyzing DNSSEC records for TLDs and specific target domains. Meant for educational purposes, security research, and sanctioned penetration testing, these tools aid in uncovering the underlying mechanisms of DNS security.
 
-## Statistics
-Based on my research at the time of writing this repository, after mapping 1,458 TLD zones, 89.78% use NSEC3, and 3.50% use NSEC, and 6.72% do not have DNSSEC features at all.
+## DNSSEC Statistics
+| Status                                   | Percentage | TLDs  |
+| ---------------------------------------- | ---------- | ----- |
+| [NSEC3](./dnssec_stats/nsec3.txt)        | 90%        | 1,313 |
+| [NSEC](./dnssec_stats/nsec.txt)          | 3%         | 51    |
+| [NO DNSSEC](./dnssec_stats/nodnssec.txt) | 7%         | 98    |
 
 ## NSEC Pitfalls
 - Results inconsistent, must hop dns servers on ALL issues to continue the crawl.
