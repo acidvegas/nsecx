@@ -1,0 +1,170 @@
+#!/bin/sh
+# NSEC Walk - developed by acidvegas (https://git.acid.vegas)
+
+# Colors
+BLUE="\033[1;34m"
+CYAN="\033[1;36m"
+GREEN="\033[1;32m"
+GREY="\033[1;90m"
+PINK="\033[1;95m"
+PURPLE="\033[0;35m"
+RED="\033[1;31m"
+YELLOW="\033[1;33m"
+RESET="\033[0m"
+
+# Set output directory
+output_dir="nwalk_out"
+mkdir -p $output_dir
+
+
+nsec_crawl() {
+    domain=$1
+
+    domain=$(echo "$domain" | sed -e 's|^\(https\?://\)\?||' -e 's|^www\.||' -e 's|/.*||')
+
+    echo "${PINK}Looking up nameservers for ${CYAN}${domain}${RESET}"
+
+    nameservers=$(dig +short +retry=3 +time=10 $domain NS | sed 's/\.$//')
+
+    [ -z "$nameservers" ] && echo "    ${GREY}No nameservers found for ${CYAN}${domain}${RESET}" && return
+
+    total_nameservers=$(echo "$nameservers" | wc -l)
+    echo "    ${BLUE}Found ${total_nameservers} nameservers for ${CYAN}${domain}${RESET}"
+
+    ns_ip_list=""
+
+    for ns in $nameservers; do
+        echo "        ${PINK}Looking up IP addresses for ${PURPLE}${ns}${RESET}"
+
+        ns_ip=$(dig +short +retry=3 +time=10 $ns A && dig +short +retry=3 +time=10 $ns AAAA)
+
+        [ -z "$ns_ip" ] && echo "            ${GREY}No IP addresses found on ${PURPLE}${ns}${GREY} for ${CYAN}${domain}${RESET}" && continue
+
+        total_ip=$(echo "$ns_ip" | wc -l)
+        echo "            ${BLUE}Found ${total_ip} IP addresses on ${PURPLE}${ns}${BLUE} for ${CYAN}${domain}${RESET}"
+
+        for ip in $ns_ip; do
+            ns_ip_list="${ns_ip_list}${ns} ${ip}\n"
+        done
+    done
+
+    [ -z "$ns_ip_list" ] && echo "    ${GREY}No IP addresses found for ${CYAN}${domain}${RESET} nameservers" && return
+
+    total_ns_ip=$(echo -e "$ns_ip_list" | wc -l)
+    echo "    ${BLUE}Found ${total_ns_ip} IP addresses for ${CYAN}${domain}${BLUE} nameservers${RESET}"
+
+    current_domain=$domain
+
+    count=0
+    error=0
+
+    ns=$(echo "$ns_ip_list" | shuf -n 1)
+
+    while true; do
+        [ -z "$nameservers" ] && echo "${GREY}No nameservers left for ${CYAN}${domain}${RESET}" && return
+        [ -z "$ns"          ] && echo "${GREY}No nameservers left for ${CYAN}${domain}${RESET}" && return
+
+        ns_domain=$(echo $ns | awk '{print $1}')
+        ns_ip=$(echo $ns | awk '{print $2}') 
+        
+        nsec=$(dig +short +retry=3 +time=10 @${ns_ip} $current_domain NSEC | awk '{print $1}' | sed 's/\.$//')
+
+        if [ -z "$nsec" ]; then
+            error=`expr $error + 1`
+            if [ $error -eq 3 ]; then
+                echo "        ${RED}Failed to communicate with ${PURPLE}${ns_domain} ${GREY}(${ns_ip})${RED} for ${CYAN}${domain}${RESET}"
+                nameservers=$(echo "$nameservers" | grep -v "$ns_ip")
+                ns=$(echo "$ns_ip_list" | shuf -n 1)
+                error=0
+            fi
+            continue
+        fi
+
+        error=0
+
+        [ "$nsec" = "$domain" ] || [ "$nsec" = "$current_domain" ] && break
+
+        case $nsec in "\000."*) break;; esac
+
+        count=`expr $count + 1`
+
+        echo "$nsec" >> "${output_dir}/nsec-${domain}.txt"
+        echo "        ${GREEN}NSEC record for ${CYAN}${domain}${GREEN} from ${PURPLE}${ns_domain} ${GREY}(${ns_ip})${GREEN} found ${YELLOW}${nsec}${RESET}"
+
+        current_domain=$nsec
+    done
+
+    if [ $count -eq 0 ]; then
+        echo "${RED}No NSEC records found for ${CYAN}${domain}${RED} from ${PURPLE}${ns}${RESET}"
+    else
+        echo "${GREEN}Found ${count} NSEC records for ${CYAN}${domain}${RESET}"
+    fi
+}
+
+
+psl_crawl() {
+    psl=$(curl -s https://publicsuffix.org/list/public_suffix_list.dat | grep -vE '^(//|.*[*!])' | grep '\.' | awk '{print $1}')
+
+    [ -z "$psl" ] && echo "${RED}No PSL TLDs found${RESET}" && exit 1
+
+    total_psl=$(echo "$psl" | wc -l)
+    echo "${BLUE}Found ${total_psl} PSL TLDs${RESET}"
+
+    for tld in $psl; do
+        nsec_crawl $tld
+    done
+}
+
+
+tld_crawl() {
+    process_domain "."
+
+    rndroot=$(find $output_dir/*.root-servers.net.txt -type f | shuf -n 1)
+
+    tlds=$(curl -s 'https://data.iana.org/TLD/tlds-alpha-by-domain.txt' | tail -n +2 | tr '[:upper:]' '[:lower:]')
+    
+    [ -z "$tlds" ] && echo "${RED}No TLDs found${RESET}" && exit 1
+
+    total_tld=$(echo "$tlds" | wc -l)
+    echo "${BLUE}Found ${total_tld} TLDs${RESET}"
+
+    for tld in $tlds; do
+        nsec_crawl $tld
+    done
+}
+
+
+
+if [ -t 0 ]; then
+    [ $# -eq 0 ] && echo "Usage: $0 <domain> or cat domain_list.txt | $0" && exit 1
+    nsec_crawl $1
+else
+    while IFS= read -r line; do
+        nsec_crawl $line
+    done
+fi
+
+if [ -t 0 ]; then
+    if [ $# -ne 1 ]; then
+        echo "Usage: $0 <option>"
+        echo ""
+        echo "Options:"
+        echo "      -tld : Perform an NSEC crawl on all TLDs"
+        echo "      -psl : Perform an NSEC crawl on all PSL TLDs"
+        echo "  <domain> : Perform an NSEC crawl on a single domain"
+        echo ""
+        echo "Standard Input:"
+        echo "  cat domain_list.txt | $0"
+        exit 1
+    elif [ $1 = '-tld' ]; then
+        tld_crawl
+    elif [ $1 = '-psl' ]; then
+        psl_crawl
+    else
+        nsec_crawl $1
+    fi
+else
+    while IFS= read -r line; do
+        nsec_crawl $line
+    done
+fi
