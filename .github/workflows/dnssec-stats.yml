@@ -1,0 +1,49 @@
+name: DNSSEC Statistics Update
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run at midnight UTC daily
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bind9-utils
+
+      - name: Run tldsec script
+        run: |
+          chmod +x extras/tldsec
+          ./extras/tldsec
+
+      - name: Update README statistics
+        run: |
+          # Calculate statistics
+          nsec3_count=$(wc -l < dnssec_stats/nsec3.txt)
+          nsec_count=$(wc -l < dnssec_stats/nsec.txt)
+          nodnssec_count=$(wc -l < dnssec_stats/nodnssec.txt)
+          total=$((nsec3_count + nsec_count + nodnssec_count))
+          
+          # Calculate percentages
+          nsec3_percent=$(awk "BEGIN {printf \"%.0f\", ($nsec3_count/$total)*100}")
+          nsec_percent=$(awk "BEGIN {printf \"%.0f\", ($nsec_count/$total)*100}")
+          nodnssec_percent=$(awk "BEGIN {printf \"%.0f\", ($nodnssec_count/$total)*100}")
+          
+          # Update README.md statistics section
+          sed -i "/## DNSSEC Statistics/,/^$/ c\## DNSSEC Statistics\n| Status                                   | Percentage | TLDs  |\n| ---------------------------------------- | ---------- | ----- |\n| [NSEC3](./dnssec_stats/nsec3.txt)        | ${nsec3_percent}%        | ${nsec3_count} |\n| [NSEC](./dnssec_stats/nsec.txt)          | ${nsec_percent}%         | ${nsec_count}    |\n| [NO DNSSEC](./dnssec_stats/nodnssec.txt) | ${nodnssec_percent}%         | ${nodnssec_count}    |\n" README.md
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add dnssec_stats/* README.md
+          git commit -m "Update DNSSEC statistics [skip ci]" || exit 0
+          git push 
