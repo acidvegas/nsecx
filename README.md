@@ -14,6 +14,8 @@ The repository contains utilities for DNSSEC zone enumeration and subdomain disc
 | [NSEC](./dnssec_stats/nsec.txt)          | 3%         | 51    |
 | [NO DNSSEC](./dnssec_stats/nodnssec.txt) | 7%         | 98    |
 
+###### These statistics are updated daily at midnight UTC via Github Actions.
+
 ## NSEC Pitfalls
 - Results inconsistent, must hop dns servers on ALL issues to continue the crawl.
 - Running into \000 *(null)* characters in sub-domains *(strange bind version [issue](https://gitlab.isc.org/isc-projects/bind9/-/issues/2779) missing "w" character in the charmap)*
