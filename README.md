@@ -10,7 +10,7 @@ The repository contains utilities for DNSSEC zone enumeration and subdomain disc
 ## DNSSEC Statistics
 | Status                                   | Percentage | TLDs  |
 | ---------------------------------------- | ---------- | ----- |
-| [NSEC3](./dnssec_stats/nsec3.txt)        | 90%        | 1,313 |
+| [NSEC3](./dnssec_stats/nsec3.txt)        | 90%        | 1313 |
 | [NSEC](./dnssec_stats/nsec.txt)          | 3%         | 51    |
 | [NO DNSSEC](./dnssec_stats/nodnssec.txt) | 7%         | 98    |
 
