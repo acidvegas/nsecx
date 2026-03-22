@@ -1,20 +1,16 @@
 #!/bin/sh
-# NSEC Walking for DNSSEC enabled zones - developed by acidvegas (https://git.acid.vegas/nsecx)
+# NSEC/NSEC3 Zone Walking - developed by acidvegas (https://github.com/acidvegas/nsecx)
 
 # Usage:
-#     NSEC walk on a single domain:
+#     Walk a single domain:
 #         ./nwalk <domain>
-#     NSEC walk on a list of domains:
+#     Walk a list of domains:
 #         cat domain_list.txt | ./nwalk
-#     NSEC walk on a list of domains using parallel:
+#     Walk a list of domains using parallel:
 #         parallel -a domain_list.txt -j 10 ./nwalk
-#     NSEC walk on all TLDs:
+#     Walk all TLDs:
 #         curl -s 'https://data.iana.org/TLD/tlds-alpha-by-domain.txt' | tail -n +2 | tr '[:upper:]' '[:lower:]' | ./nwalk
-#     NSEC walk on all PSL TLDs:
-#         curl -s https://publicsuffix.org/list/public_suffix_list.dat | grep -vE '^(//|.*[*!])' | grep '\.' | awk '{print $1}' | ./nwalk
 
-# Colors
-BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 GREEN="\033[1;32m"
 GREY="\033[1;90m"
@@ -24,99 +20,285 @@ RED="\033[1;31m"
 YELLOW="\033[1;33m"
 RESET="\033[0m"
 
-nsec_crawl() {
-    domain=$1
-
-    domain=$(echo "$domain" | sed -e 's|^\(https\?://\)\?||' -e 's|^www\.||' -e 's|/.*||')
-
-    echo "${PINK}Looking up nameservers for ${CYAN}${domain}${RESET}"
-
-    nameservers=$(dig +short +retry=3 +time=10 $domain NS | sed 's/\.$//')
-
-    [ -z "$nameservers" ] && echo "    ${GREY}No nameservers found for ${CYAN}${domain}${RESET}" && return
-
-    total_nameservers=$(echo "$nameservers" | wc -l)
-    echo "    ${BLUE}Found ${total_nameservers} nameservers for ${CYAN}${domain}${RESET}"
-
-    ns_ip_list=""
-
-    for ns in $nameservers; do
-        echo "        ${PINK}Looking up IP addresses for ${PURPLE}${ns}${RESET}"
-
-        ns_ip=$(dig +short +retry=3 +time=10 $ns A && dig +short +retry=3 +time=10 $ns AAAA)
-
-        [ -z "$ns_ip" ] && echo "            ${GREY}No IP addresses found on ${PURPLE}${ns}${GREY} for ${CYAN}${domain}${RESET}" && continue
-
-        total_ip=$(echo "$ns_ip" | wc -l)
-        echo "            ${BLUE}Found ${total_ip} IP addresses on ${PURPLE}${ns}${BLUE} for ${CYAN}${domain}${RESET}"
-
-        for ip in $ns_ip; do
-            ns_ip_list="${ns_ip_list}${ns} ${ip}\n"
-        done
-    done
-
-    [ -z "$ns_ip_list" ] && echo "    ${GREY}No IP addresses found for ${CYAN}${domain}${RESET} nameservers" && return
-
-    total_ns_ip=$(echo -e "$ns_ip_list" | wc -l)
-    echo "    ${BLUE}Found ${total_ns_ip} IP addresses for ${CYAN}${domain}${BLUE} nameservers${RESET}"
-
-    current_domain=$domain
-
-    count=0
-    error=0
-
-    ns=$(echo "$ns_ip_list" | shuf -n 1)
-
-    while true; do
-        [ -z "$nameservers" ] && echo "${GREY}No nameservers left for ${CYAN}${domain}${RESET}" && return
-        [ -z "$ns"          ] && echo "${GREY}No nameservers left for ${CYAN}${domain}${RESET}" && return
-
-        ns_domain=$(echo $ns | awk '{print $1}')
-        ns_ip=$(echo $ns | awk '{print $2}') 
-        
-        nsec=$(dig +short +retry=3 +time=10 @${ns_ip} $current_domain NSEC | awk '{print $1}' | sed 's/\.$//')
-
-        if [ -z "$nsec" ]; then
-            error=`expr $error + 1`
-            if [ $error -eq 3 ]; then
-                echo "        ${RED}Failed to communicate with ${PURPLE}${ns_domain} ${GREY}(${ns_ip})${RED} for ${CYAN}${domain}${RESET}"
-                nameservers=$(echo "$nameservers" | grep -v "$ns_ip")
-                ns=$(echo "$ns_ip_list" | shuf -n 1)
-                error=0
-            fi
-            continue
-        fi
-
-        error=0
-
-        [ "$nsec" = "$domain" ] || [ "$nsec" = "$current_domain" ] && break
-
-        case $nsec in "\000."*) break;; esac
-
-        count=`expr $count + 1`
-
-        echo "$nsec" >> "${output_dir}/nsec-${domain}.txt"
-        echo "        ${GREEN}NSEC record for ${CYAN}${domain}${GREEN} from ${PURPLE}${ns_domain} ${GREY}(${ns_ip})${GREEN} found ${YELLOW}${nsec}${RESET}"
-
-        current_domain=$nsec
-    done
-
-    if [ $count -eq 0 ]; then
-        echo "${RED}No NSEC records found for ${CYAN}${domain}${RED} from ${PURPLE}${ns}${RESET}"
-    else
-        echo "${GREEN}Found ${count} NSEC records for ${CYAN}${domain}${RESET}"
-    fi
+rand_str() {
+	head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 12
 }
 
-# Set output directory
+relativize() {
+	sed -e "s/^${1}\./@ /" -e "s/\.${1}\.//g" | tr -s ' \t' ' '
+}
+
+print_records() {
+	label=$1
+	pad=$(printf '%*s' ${#label} '')
+	first=1
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		set -- $line
+		name=$1; ttl=$2; class=$3; type=$4; shift 4; rdata="$*"
+		if [ $first -eq 1 ]; then
+			printf "${PINK}%s ${CYAN}%s ${GREY}%s ${PURPLE}%s ${GREEN}%s ${YELLOW}%s${RESET}\n" "$label" "$name" "$ttl" "$class" "$type" "$rdata"
+			first=0
+		else
+			printf "%s ${CYAN}%s ${GREY}%s ${PURPLE}%s ${GREEN}%s ${YELLOW}%s${RESET}\n" "$pad" "$name" "$ttl" "$class" "$type" "$rdata"
+		fi
+	done
+}
+
+resolve_apex() {
+	ns_ip=$1
+	domain=$2
+	outfile=$3
+
+	apex=""
+	soa=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${domain}. SOA 2>/dev/null | grep -v ';;' | relativize "$domain")
+	[ -n "$soa" ] && apex="$soa"
+
+	ns_records=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${domain}. NS 2>/dev/null | grep -v ';;' | relativize "$domain")
+	[ -n "$ns_records" ] && apex=$(printf '%s\n%s' "$apex" "$ns_records")
+
+	if [ -n "$apex" ]; then
+		echo "$apex" >> "$outfile"
+		echo "$apex" | print_records "[apex]"
+	fi
+}
+
+resolve_name() {
+	name=$1
+	ns_ip=$2
+	outfile=$3
+	domain=$4
+	count=$5
+
+	result=$(dig +noall +authority +additional +retry=10 +time=10 @${ns_ip} ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+	if [ -z "$result" ]; then
+		result=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+	fi
+	if [ -z "$result" ]; then
+		result=$(dig +noall +answer +additional +retry=10 +time=10 ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+	fi
+	if [ -n "$result" ]; then
+		echo "$result" >> "$outfile"
+		echo "$result" | print_records "[$count]"
+	else
+		result=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${name}. NSEC 2>/dev/null | grep -v ';;' | relativize "$domain")
+		if [ -n "$result" ]; then
+			echo "$result" >> "$outfile"
+			echo "$result" | print_records "[$count]"
+		else
+			relative=$(echo "$name" | sed "s/\.${domain}$//")
+			line="$relative 0 IN NSEC ?"
+			echo "$line" >> "$outfile"
+			echo "$line" | print_records "[$count]"
+		fi
+	fi
+}
+
+walk_nsec() {
+	printf "    ${YELLOW}Detected NSEC${RESET}\n"
+
+	outfile="${output_dir}/${domain}.zone"
+	: > "$outfile"
+
+	current_domain=$domain
+	count=0
+	error=0
+	apex_done=0
+
+	while true; do
+		ns=$(printf '%b' "$ns_ip_list" | grep -v '^$' | shuf -n 1)
+		[ -z "$ns" ] && printf "${RED}No nameservers for ${CYAN}${domain}${RESET}\n" && return
+
+		ns_domain=$(echo $ns | awk '{print $1}')
+		ns_ip=$(echo $ns | awk '{print $2}')
+
+		nsec_raw=$(dig +short +retry=10 +time=10 @${ns_ip} $current_domain NSEC 2>/dev/null)
+		dig_rc=$?
+		nsec=$(echo "$nsec_raw" | grep -v ';;' | awk '{print $1}' | sed 's/\.$//')
+
+		if [ -z "$nsec" ]; then
+			if [ $dig_rc -eq 0 ]; then
+				label=$(echo "$current_domain" | sed "s/\.${domain}$//")
+				printf "        ${YELLOW}NSEC gap at ${CYAN}${current_domain}${YELLOW} — jumping past${RESET}\n"
+				nsec=$(dig +noall +authority +dnssec +retry=10 +time=10 @${ns_ip} "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
+				if [ -n "$nsec" ]; then
+					current_domain=$nsec
+					error=0
+					continue
+				fi
+				printf "        ${RED}Could not jump past ${CYAN}${current_domain}${RED} — zone walk incomplete${RESET}\n"
+				break
+			fi
+			error=$((error + 1))
+			[ $((error % 100)) -eq 0 ] && printf "        ${RED}[${error}] Failed ${error} times on ${CYAN}${current_domain}${RED} — still retrying${RESET}\n"
+			continue
+		fi
+
+		error=0
+
+		if [ $apex_done -eq 0 ]; then
+			resolve_apex "$ns_ip" "$domain" "$outfile"
+			apex_done=1
+		fi
+
+		[ "$nsec" = "$domain" ] && break
+		case $nsec in "\000."*) break;; esac
+
+		if [ "$nsec" = "$current_domain" ]; then
+			label=$(echo "$current_domain" | sed "s/\.${domain}$//")
+			printf "        ${YELLOW}NSEC gap at ${CYAN}${current_domain}${YELLOW} — jumping past${RESET}\n"
+			nsec=$(dig +noall +authority +dnssec +retry=10 +time=10 @${ns_ip} "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
+			if [ -n "$nsec" ] && [ "$nsec" != "$domain" ]; then
+				current_domain=$nsec
+				continue
+			fi
+			break
+		fi
+
+		count=$((count + 1))
+
+		resolve_name "$nsec" "$ns_ip" "$outfile" "$domain" "$count"
+
+		current_domain=$nsec
+	done
+
+	if [ $count -eq 0 ]; then
+		rm -f "$outfile"
+		printf "${RED}No NSEC records found for ${CYAN}${domain}${RESET}\n"
+	else
+		total_records=$(wc -l < "$outfile")
+		printf "${GREEN}Done — ${count} names, ${total_records} records written to ${outfile}${RESET}\n"
+	fi
+}
+
+walk_nsec3() {
+	printf "    ${YELLOW}Detected NSEC3${RESET}\n"
+
+	algo=$(echo "$nsec3param" | awk '{print $1}')
+	flags=$(echo "$nsec3param" | awk '{print $2}')
+	iterations=$(echo "$nsec3param" | awk '{print $3}')
+	salt=$(echo "$nsec3param" | awk '{print $4}')
+
+	printf "    ${GREEN}NSEC3PARAM: ${YELLOW}algo=${algo} flags=${flags} iter=${iterations} salt=${salt}${RESET}\n"
+
+	outfile="${output_dir}/${domain}.jsonl"
+	: > "$outfile"
+
+	query_count=0
+
+	printf "    ${PINK}Gathering NSEC3 hashes...${RESET}\n"
+
+	while true; do
+		query_count=$((query_count + 1))
+
+		nsec3_records=$(dig +noall +authority +dnssec +retry=3 +time=5 @${detect_ns_ip} "$(rand_str).${domain}." A 2>/dev/null | grep ' IN NSEC3 ')
+
+		if [ -n "$nsec3_records" ]; then
+			echo "$nsec3_records" | while IFS= read -r line; do
+				[ -z "$line" ] && continue
+				hash=$(echo "$line" | awk '{print $1}' | sed "s/\.${domain}\.$//" | tr '[:lower:]' '[:upper:]')
+				next_hash=$(echo "$line" | awk '{print $9}' | tr '[:lower:]' '[:upper:]')
+				types=$(echo "$line" | awk '{for(i=10;i<=NF;i++) printf "%s ", $i}')
+
+				if ! grep -qF "$hash" "$outfile" 2>/dev/null; then
+					printf '{"hash":"%s","next":"%s","types":"%s","domain":"%s","nsec3param":"%s"}\n' "$hash" "$next_hash" "$types" "$domain" "$nsec3param" >> "$outfile"
+					cur_count=$(wc -l < "$outfile" | tr -d ' ')
+					printf "    ${GREEN}[%s] ${CYAN}%s ${GREY}-> ${YELLOW}%s${RESET}\n" "$cur_count" "$hash" "$next_hash"
+				fi
+			done
+		fi
+
+		if [ $((query_count % 100)) -eq 0 ]; then
+			count=$(wc -l < "$outfile" | tr -d ' ')
+			if [ "$count" -gt 0 ]; then
+				missing=$(awk -F'"' '{hashes[$4]=1; nexts[$8]=1} END {for (n in nexts) if (!(n in hashes)) {print n; exit}}' "$outfile")
+				if [ -z "$missing" ]; then
+					printf "    ${GREEN}Chain complete — ${count} hashes cover the full zone${RESET}\n"
+					break
+				fi
+			fi
+		fi
+	done
+
+	count=$(wc -l < "$outfile" | tr -d ' ')
+
+	if [ "$count" -eq 0 ]; then
+		rm -f "$outfile"
+		printf "${RED}No NSEC3 hashes gathered for ${CYAN}${domain}${RESET}\n"
+	else
+		printf "${GREEN}Done — ${count} unique NSEC3 hashes for ${CYAN}${domain}${RESET}\n"
+		printf "${GREY}Output: ${outfile}${RESET}\n"
+	fi
+}
+
+nwalk_zone() {
+	domain=$1
+
+	domain=$(echo "$domain" | sed -e 's|^\(https\?://\)\?||' -e 's|^www\.||' -e 's|/.*||')
+
+	printf "${PINK}Looking up nameservers for ${CYAN}${domain}${RESET}\n"
+
+	nameservers=$(dig +short +retry=3 +time=10 $domain NS | grep -v ';;' | sed 's/\.$//')
+
+	[ -z "$nameservers" ] && printf "    ${GREY}No nameservers found for ${CYAN}${domain}${RESET}\n" && return
+
+	ns_ip_list=""
+	for ns in $nameservers; do
+		ns_ip=$(dig +short +retry=3 +time=10 $ns A 2>/dev/null | grep -v ';;' && dig +short +retry=3 +time=10 $ns AAAA 2>/dev/null | grep -v ';;')
+		[ -z "$ns_ip" ] && continue
+		for ip in $ns_ip; do
+			ns_ip_list="${ns_ip_list}${ns} ${ip}\n"
+		done
+	done
+
+	[ -z "$ns_ip_list" ] && printf "    ${RED}No IP addresses found for ${CYAN}${domain}${RESET} nameservers\n" && return
+
+	dnssec_type=""
+	detect_ns=""
+	detect_ns_ip=""
+	nsec3param=""
+
+	for ns in $nameservers; do
+		probe_ip=$(dig +short +retry=3 +time=10 $ns A 2>/dev/null | grep -v ';;' | head -1)
+		[ -z "$probe_ip" ] && continue
+
+		nsec3param=$(dig +short +retry=3 +time=10 @${probe_ip} $domain NSEC3PARAM 2>/dev/null | grep -v ';;')
+		if [ -n "$nsec3param" ]; then
+			dnssec_type="nsec3"
+			detect_ns=$ns
+			detect_ns_ip=$probe_ip
+			break
+		fi
+
+		nsec_test=$(dig +short +retry=3 +time=10 @${probe_ip} $domain NSEC 2>/dev/null | grep -v ';;')
+		if [ -n "$nsec_test" ]; then
+			dnssec_type="nsec"
+			detect_ns=$ns
+			detect_ns_ip=$probe_ip
+			break
+		fi
+	done
+
+	if [ -z "$dnssec_type" ]; then
+		printf "    ${GREY}No DNSSEC found for ${CYAN}${domain}${RESET}\n"
+		return
+	fi
+
+	if [ "$dnssec_type" = "nsec3" ]; then
+		walk_nsec3
+	else
+		walk_nsec
+	fi
+}
+
 output_dir="nwalk_out"
 mkdir -p $output_dir
 
 if [ -t 0 ]; then
-    [ $# -ne 1 ] && echo "Usage: $0 <domain> or cat domain_list.txt | $0" && exit 1
-    nsec_crawl $1
+	[ $# -ne 1 ] && echo "Usage: $0 <domain> or cat domain_list.txt | $0" && exit 1
+	nwalk_zone $1
 else
-    while IFS= read -r line; do
-        nsec_crawl $line
-    done
+	while IFS= read -r line; do
+		nwalk_zone $line
+	done
 fi

@@ -1,0 +1,71 @@
+#!/bin/sh
+# NSEC Statistics for TLDs - developed by acidvegas (https://github.com/acidvegas/nsecx)
+# nsecx/extras/tldsec
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+GRAY='\033[1;30m'
+NC='\033[0m'
+
+OUTPUT_FILE="dnssec_report_$(date +%Y-%m-%d).json"
+TMP_FILE=$(mktemp)
+
+echo "Fetching TLD list from IANA..."
+curl -s 'https://data.iana.org/TLD/tlds-alpha-by-domain.txt' | tail -n +2 | tr '[:upper:]' '[:lower:]' > "$TMP_FILE"
+
+total=$(wc -l < "$TMP_FILE" | tr -d ' ')
+
+if [ "$total" -eq 0 ]; then
+	echo "Failed to fetch TLD list from IANA"
+	rm -f "$TMP_FILE"
+	exit 1
+fi
+
+echo "Got ${total} TLDs from IANA"
+
+current=0
+nsec_total=0
+nsec3_total=0
+skip_total=0
+
+> "$OUTPUT_FILE"
+
+while IFS= read -r tld || [ -n "$tld" ]; do
+	[ -z "$tld" ] && continue
+	tld=$(printf "%s" "$tld" | tr '[:upper:]' '[:lower:]')
+	current=$((current + 1))
+
+	printf "\r${CYAN}%s/%s${NC} ${GRAY}|${NC} ${GREEN}NSEC: ${NC}%s ${GRAY}|${NC} ${YELLOW}NSEC3: ${NC}%s ${GRAY}|${NC} ${RED}SKIP: ${NC}%s ${GRAY}|${NC} ${PURPLE}%s${NC}" "$current" "$total" "$nsec_total" "$nsec3_total" "$skip_total" "$tld"
+
+	dnskey=$(dig +short +time=10 +tries=10 "${tld}." DNSKEY 2>/dev/null | grep -v ';;')
+	if [ -z "$dnskey" ]; then
+		skip_total=$((skip_total + 1))
+		printf '{"tld":"%s","dnssec":null}\n' "$tld" >> "$OUTPUT_FILE"
+		continue
+	fi
+
+	nsec3param=$(dig +short +time=10 +tries=10 "${tld}." NSEC3PARAM 2>/dev/null | grep -v ';;')
+	if [ -n "$nsec3param" ]; then
+		nsec3_total=$((nsec3_total + 1))
+		params=$(printf '%s' "$nsec3param" | head -1 | awk '{print $1,$2,$3,$4}')
+		printf '{"tld":"%s","dnssec":"NSEC3","params":"%s"}\n' "$tld" "$params" >> "$OUTPUT_FILE"
+		continue
+	fi
+
+	nsec=$(dig +short +time=10 +tries=10 "${tld}." NSEC 2>/dev/null | grep -v ';;')
+	if [ -n "$nsec" ]; then
+		nsec_total=$((nsec_total + 1))
+		printf '{"tld":"%s","dnssec":"NSEC"}\n' "$tld" >> "$OUTPUT_FILE"
+		continue
+	fi
+
+	skip_total=$((skip_total + 1))
+	printf '{"tld":"%s","dnssec":null}\n' "$tld" >> "$OUTPUT_FILE"
+done < "$TMP_FILE"
+
+rm -f "$TMP_FILE"
+
+printf "\n\nDone — NSEC: %s | NSEC3: %s | No DNSSEC: %s | Total: %s\nReport: %s\n" "$nsec_total" "$nsec3_total" "$skip_total" "$total" "$OUTPUT_FILE"
