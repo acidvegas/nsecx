@@ -1,5 +1,5 @@
 #!/bin/sh
-# NSEC/NSEC3 Zone Walking - developed by acidvegas (https://github.com/acidvegas/nsecx)
+# NSEC[3] Walking for DNSSEC Enabled Zones - Developed by acidvegas (https://github.com/acidvegas/nsecx)
 
 # Usage:
 #     Walk a single domain:
@@ -291,7 +291,7 @@ nwalk_zone() {
 	fi
 }
 
-output_dir="nwalk_out"
+output_dir="nsecx_out"
 mkdir -p $output_dir
 
 if [ -t 0 ]; then

@@ -1,0 +1,4 @@
+# NSEC Statistics for TLDs - developed by acidvegas (https://github.com/acidvegas/nsecx)
+# nsecx/.gitignore
+
+nsecx_out/
