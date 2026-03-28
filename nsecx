@@ -51,10 +51,10 @@ resolve_apex() {
 	outfile=$3
 
 	apex=""
-	soa=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${domain}. SOA 2>/dev/null | grep -v ';;' | relativize "$domain")
+	soa=$(dig +noall +noidnin +answer +retry=10 +time=10 @${ns_ip} -q "${domain}." -t SOA 2>/dev/null | grep -v ';;' | relativize "$domain")
 	[ -n "$soa" ] && apex="$soa"
 
-	ns_records=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${domain}. NS 2>/dev/null | grep -v ';;' | relativize "$domain")
+	ns_records=$(dig +noall +noidnin +answer +retry=10 +time=10 @${ns_ip} -q "${domain}." -t NS 2>/dev/null | grep -v ';;' | relativize "$domain")
 	[ -n "$ns_records" ] && apex=$(printf '%s\n%s' "$apex" "$ns_records")
 
 	if [ -n "$apex" ]; then
@@ -70,18 +70,18 @@ resolve_name() {
 	domain=$4
 	count=$5
 
-	result=$(dig +noall +authority +additional +retry=10 +time=10 @${ns_ip} ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+	result=$(dig +noall +noidnin +authority +additional +retry=10 +time=10 @${ns_ip} -q "${name}." -t NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
 	if [ -z "$result" ]; then
-		result=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+		result=$(dig +noall +noidnin +answer +retry=10 +time=10 @${ns_ip} -q "${name}." -t NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
 	fi
 	if [ -z "$result" ]; then
-		result=$(dig +noall +answer +additional +retry=10 +time=10 ${name}. NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
+		result=$(dig +noall +noidnin +answer +additional +retry=10 +time=10 -q "${name}." -t NS 2>/dev/null | grep -v ';;' | awk '$4 != "SOA"' | relativize "$domain")
 	fi
 	if [ -n "$result" ]; then
 		echo "$result" >> "$outfile"
 		echo "$result" | print_records "[$count]"
 	else
-		result=$(dig +noall +answer +retry=10 +time=10 @${ns_ip} ${name}. NSEC 2>/dev/null | grep -v ';;' | relativize "$domain")
+		result=$(dig +noall +noidnin +answer +retry=10 +time=10 @${ns_ip} -q "${name}." -t NSEC 2>/dev/null | grep -v ';;' | relativize "$domain")
 		if [ -n "$result" ]; then
 			echo "$result" >> "$outfile"
 			echo "$result" | print_records "[$count]"
@@ -112,7 +112,7 @@ walk_nsec() {
 		ns_domain=$(echo $ns | awk '{print $1}')
 		ns_ip=$(echo $ns | awk '{print $2}')
 
-		nsec_raw=$(dig +short +retry=10 +time=10 @${ns_ip} $current_domain NSEC 2>/dev/null)
+		nsec_raw=$(dig +short +noidnin +retry=10 +time=10 @${ns_ip} -q "$current_domain" -t NSEC 2>/dev/null)
 		dig_rc=$?
 		nsec=$(echo "$nsec_raw" | grep -v ';;' | awk '{print $1}' | sed 's/\.$//')
 
@@ -120,7 +120,7 @@ walk_nsec() {
 			if [ $dig_rc -eq 0 ]; then
 				label=$(echo "$current_domain" | sed "s/\.${domain}$//")
 				printf "        ${YELLOW}NSEC gap at ${CYAN}${current_domain}${YELLOW} — jumping past${RESET}\n"
-				nsec=$(dig +noall +authority +dnssec +retry=10 +time=10 @${ns_ip} "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
+				nsec=$(dig +noall +noidnin +authority +dnssec +retry=10 +time=10 @${ns_ip} -q "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
 				if [ -n "$nsec" ]; then
 					current_domain=$nsec
 					error=0
@@ -147,7 +147,7 @@ walk_nsec() {
 		if [ "$nsec" = "$current_domain" ]; then
 			label=$(echo "$current_domain" | sed "s/\.${domain}$//")
 			printf "        ${YELLOW}NSEC gap at ${CYAN}${current_domain}${YELLOW} — jumping past${RESET}\n"
-			nsec=$(dig +noall +authority +dnssec +retry=10 +time=10 @${ns_ip} "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
+			nsec=$(dig +noall +noidnin +authority +dnssec +retry=10 +time=10 @${ns_ip} -q "${label}\\001.${domain}." 2>/dev/null | awk -v name="${current_domain}." '$1 == name && $4 == "NSEC" {print $5; exit}' | sed 's/\.$//')
 			if [ -n "$nsec" ] && [ "$nsec" != "$domain" ]; then
 				current_domain=$nsec
 				continue
